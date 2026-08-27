@@ -2,246 +2,291 @@ import { spawn } from "child_process";
 import path, { join } from "path";
 import { readdirSync } from "fs";
 
-process.stdin.setRawMode(true);
-
-const songDir = readdirSync(join(process.cwd(), 'songs'), {
-    encoding: 'utf8',
-});
-
-
-/**
-    let input = ''; since chunk is immediateky transfered => no need of this    
-**/
-const allSongs = songDir.filter(fileName => {
-    return fileName.endsWith('.mp3') ? true : false
-})
-
-
-let player = null;
-let paused = false;
-
-let startTime = 0;
-let pausedAt = 0;
-let totalPausedTime = 0;
-let seekBarInterval = null;
-
-let currentSongIndex = 0;
-
-
-function buildMenu() {
-    process.stdout.write('\x1B[2J'); // clears screen
-    process.stdout.write('\x1B[0;0H'); // move cursor to the 0th row and column
-
-    allSongs.forEach((song, index) => {
-        if(currentSongIndex === index) {
-            console.log(` > ${song}`);
-        } else {
-            console.log(`${song}`);
-        }
-    })
+class SongMetadata {
+    constructor(duration, fileName, filePath) {
+        this.duration = duration;
+        this.fileName = fileName;
+        this.filePath = filePath;
+    }
 }
 
-async function playSong() {
-    if(player) {
-        clearInterval(seekBarInterval);
-        seekBarInterval = null;
-        paused = false;
-        startTime = 0;
-        pausedAt = 0;
-        totalPausedTime = 0;
-        player.kill();
-        player = null;
+class SongManager {
+    constructor(directory = join(process.cwd(), 'songs')) {
+        this.songsDirectory = directory;
+        this.allSongs = this.loadSongs();
     }
 
-    
-    try {
-        const songPath = join(process.cwd(), 'songs', allSongs[currentSongIndex]);
+    loadSongs() {
+        try {
+            const files = readdirSync(this.songsDirectory, { encoding: 'utf8' });
+            return files.filter(fileName => fileName.endsWith('.mp3'));
+        } catch (e) {
+            return [];
+        }
+    }
 
-        const { duration } = await getSongInfo(songPath);
+    getSongPath(index) {
+        if (index < 0 || index >= this.allSongs.length) return null;
+        return join(this.songsDirectory, this.allSongs[index]);
+    }
 
-        const childProcess = spawn('vlc', [songPath, '--intf', 'rc', '--play-and-exit'], {
-            stdio: 'pipe',
+    getSongName(index) {
+        return this.allSongs[index] || null;
+    }
+
+    getSongCount() {
+        return this.allSongs.length;
+    }
+}
+
+class AudioEngine {
+    constructor(songManager, onTrackChange = null) {
+        this.songManager = songManager;
+        this.onTrackChange = onTrackChange;
+        this.player = null;
+        this.paused = false;
+        this.startTime = 0;
+        this.pausedAt = 0;
+        this.totalPausedTime = 0;
+        this.seekBarInterval = null;
+        this.currentSongIndex = 0;
+    }
+
+    getSongInfo(songPath) {
+        return new Promise((resolve, reject) => {
+            const childProcess = spawn('afinfo', [songPath], {
+                stdio: 'pipe'
+            });
+
+            let output = '';
+
+            childProcess.stdout.on('data', chunk => {
+                output += chunk.toString();
+            });
+
+            childProcess.stdout.on('end', () => {
+                const match = output.match(/estimated duration:\s+([\d.]+)\s+sec/);
+                if (!match) {
+                    reject({ duration: null });
+                    return;
+                }
+
+                resolve(new SongMetadata(
+                    Number(match[1]).toFixed(2),
+                    path.basename(songPath),
+                    songPath
+                ));
+            });
+
+            childProcess.stdout.on('error', (err) => {
+                reject(err);
+            });
+        });
+    }
+
+    async playSong(index = this.currentSongIndex) {
+        this.stop();
+
+        this.currentSongIndex = index;
+        const songPath = this.songManager.getSongPath(this.currentSongIndex);
+        if (!songPath) return;
+
+        try {
+            const metadata = await this.getSongInfo(songPath);
+
+            const childProcess = spawn('afplay', [songPath], {
+                stdio: 'pipe',
+            });
+
+            childProcess.on('error', (err) => {
+                console.log(`\nPlayback error: ${err.message}`);
+            });
+
+            childProcess.on('spawn', () => {
+                this.startTime = Date.now();
+                this.startSeekBar(metadata.duration);
+            });
+
+            childProcess.on('close', (code, signal) => {
+                if (this.player === childProcess) {
+                    this.nextSong();
+                }
+            });
+
+            this.player = childProcess;
+        } catch (e) {
+            console.log(`\nMusic duration could not be extracted, so music cannot be played.`);
+        }
+    }
+
+    pauseResume() {
+        if (!this.player) return;
+
+        if (this.paused) {
+            this.player.kill('SIGCONT');
+            this.totalPausedTime += Date.now() - this.pausedAt;
+        } else {
+            this.player.kill('SIGSTOP');
+            this.pausedAt = Date.now();
+        }
+
+        this.paused = !this.paused;
+    }
+
+    nextSong() {
+        const total = this.songManager.getSongCount();
+        if (total === 0) return;
+        this.currentSongIndex = (this.currentSongIndex + 1) % total;
+        if (this.onTrackChange) this.onTrackChange(this.currentSongIndex);
+        this.playSong(this.currentSongIndex);
+    }
+
+    previousSong() {
+        const total = this.songManager.getSongCount();
+        if (total === 0) return;
+        this.currentSongIndex = (this.currentSongIndex === 0 ? total - 1 : this.currentSongIndex - 1) % total;
+        if (this.onTrackChange) this.onTrackChange(this.currentSongIndex);
+        this.playSong(this.currentSongIndex);
+    }
+
+    stop() {
+        if (this.seekBarInterval) {
+            clearInterval(this.seekBarInterval);
+            this.seekBarInterval = null;
+        }
+        this.paused = false;
+        this.startTime = 0;
+        this.pausedAt = 0;
+        this.totalPausedTime = 0;
+
+        if (this.player) {
+            this.player.removeAllListeners('close');
+            this.player.kill();
+            this.player = null;
+        }
+    }
+
+    startSeekBar(duration) {
+        this.seekBarInterval = setInterval(() => {
+            if (this.paused) return;
+
+            const timeElapsed = Number(((Date.now() - this.startTime - this.totalPausedTime) / 1000).toFixed(0));
+
+            if (timeElapsed >= duration) {
+                TerminalInterface.drawSeekBar(duration, duration);
+                clearInterval(this.seekBarInterval);
+            } else {
+                TerminalInterface.drawSeekBar(timeElapsed, duration);
+            }
+        }, 1000);
+    }
+}
+
+class TerminalInterface {
+    constructor(songManager, audioEngine) {
+        this.songManager = songManager;
+        this.audioEngine = audioEngine;
+        this.currentSongIndex = 0;
+        this.isRawMode = true;
+
+        this.audioEngine.onTrackChange = (newIndex) => {
+            this.currentSongIndex = newIndex;
+            this.buildMenu();
+        };
+
+        this.init();
+    }
+
+    init() {
+        process.stdin.setRawMode(this.isRawMode);
+        process.stdin.on('data', (chunk) => this.handleInput(chunk));
+
+        process.on('SIGINT', (signal) => {
+            this.audioEngine.stop();
+            console.log(`\nClosing player with received signal: ${signal}`);
+            console.log('Bye Bye');
+            process.exit();
         });
 
-        // vlc process started
-        childProcess.on('spawn', () => {
-            startTime = Date.now();
-            seekBar(duration);
-        })
-
-        childProcess.on('close', (code, singal) => {
-            // auto advancement
-            currentSongIndex = (currentSongIndex + 1) % allSongs.length;
-            buildMenu();
-            playSong()
-        })
-
-        player = childProcess;
-
-    } catch(e) {
-        console.log(`Music Duration does not extracted, so music can't be played.`)
+        this.buildMenu();
     }
-}
 
-function getSongInfo(songPath) {
-    return new Promise((resolve, reject) => {
-        const childProcess = spawn('afinfo', [songPath], {
-            stdio: 'pipe'
-        })
+    buildMenu() {
+        process.stdout.write('\x1B[2J');   // clear screen
+        process.stdout.write('\x1B[0;0H'); // move cursor to row 0, col 0
 
-        let output = '';
-
-        /**
-            * chunk is recived as Buffer, which can be converted into string format using toString
-        */
-        childProcess.stdout.on('data', chunk => {
-            output += chunk.toString();
-        })
-
-        childProcess.stdout.on('end', () => {
-            const match = output.match(/estimated duration:\s+([\d.]+)\s+sec/);
-
-            if(!match) {
-                reject({
-                    duration: null
-                })
-                return;
+        const songs = this.songManager.allSongs;
+        songs.forEach((song, index) => {
+            if (this.currentSongIndex === index) {
+                console.log(` > ${song}`);
+            } else {
+                console.log(`   ${song}`);
             }
+        });
+    }
 
-            resolve({
-                duration: Number(match[1]).toFixed(2),
-            });
-        })
+    static drawSeekBar(timeElapsed, duration) {
+        const width = 30;
+        const fraction = Math.min(1, timeElapsed / duration);
+        const fill = Math.floor(fraction * width);
+        const empty = width - fill;
 
-        childProcess.stdout.on('error', (err) => {
-            reject(err);
-        })
-    })
-}
+        const bar = `${'█'.repeat(fill)}${'░'.repeat(empty)}`;
+        process.stdout.write(`\r[${bar}] ${timeElapsed}/${duration}s`);
+    }
 
-function seekBar(duration) {
+    handleInput(chunk) {
+        const total = this.songManager.getSongCount();
 
-    seekBarInterval = setInterval(() => {
-        if(paused) {
+        // Exit on Ctrl+C (3), 'Q' (81), 'q' (113)
+        if (chunk[0] === 3 || chunk[0] === 81 || chunk[0] === 113) {
+            process.kill(process.pid, 'SIGINT');
             return;
         }
-        // convert to seconds
-        const timeElapsed = Number(((Date.now() - startTime - totalPausedTime) / 1000).toFixed(0)); 
-        
-        if(timeElapsed >= duration) {
-            drawSeekBar(duration, duration);
-            clearInterval(seekBarInterval);
-        } else {
-            drawSeekBar(timeElapsed, duration);
-        }
-    }, 1000);
-}
 
-function drawSeekBar(timeElapsed, duration) {
-    const width = 30;
-    const fraction = timeElapsed / duration;
-
-    const fill = Math.floor(fraction * width);
-    const empty = width - fill;
-
-    const bar = `${'█'.repeat(fill)}${'░'.repeat(empty)}`
-    process.stdout.write(`\r[${bar}] ${timeElapsed}/${duration}`)
-}
-
-process.stdin.on('data', chunk => {
-    
-    if(chunk[0] === 3 || chunk[0] === 81 || chunk[0] === 113) {
-        process.kill(process.pid, 'SIGINT'); 
-        return;
-    }
-
-    /**
-        arrow key detection, since arrow keys arrives in 3 Bytes, length of chunk = 3
-     */
-
-    /**
-        gets the escape character
-     */
-    if(chunk[0] === 27) {
-        if(chunk[1] === 91) {
-            if(chunk[2] === 65) {
-                if(!paused) {
-                    console.log('up key');
-                    currentSongIndex = (currentSongIndex === 0 ? allSongs.length - 1 : currentSongIndex - 1) % allSongs.length;
-                    buildMenu()
-                } else {
-                    // currently music is playing, stop and then go to next
+        // Arrow keys
+        if (chunk[0] === 27 && chunk[1] === 91) {
+            if (chunk[2] === 65) { // Up Arrow
+                if (!this.audioEngine.paused) {
+                    this.currentSongIndex = (this.currentSongIndex === 0 ? total - 1 : this.currentSongIndex - 1) % total;
+                    this.buildMenu();
                 }
-            } else if(chunk[2] === 66) {
-                if(!paused) {
-                    console.log('down arrow key');
-                    currentSongIndex = (currentSongIndex + 1) % allSongs.length;
-                    buildMenu();
-                } else {
-                    // currently music is playing
+            } else if (chunk[2] === 66) { // Down Arrow
+                if (!this.audioEngine.paused) {
+                    this.currentSongIndex = (this.currentSongIndex + 1) % total;
+                    this.buildMenu();
                 }
-            } else if(chunk[2] === 67) {
-                console.log('right arrow key');
-            } else if(chunk[2] === 68) {
-                console.log('left arrow key')
             }
-        }
-        return
-    }
-
-    /**
-        enter key represent carriage return
-        ascii code is 13
-     */
-    if(chunk[0] === 13) {
-        playSong();
-        return;
-    }
-
-    /**
-        pause, resume
-     */
-
-    if(chunk[0] === 80 || chunk[0] === 112) {
-        player.stdin.write(`pause\n`);
-
-        if(paused) {
-            totalPausedTime += Date.now() - pausedAt;
-        } else {
-            // pause music
-            pausedAt = Date.now()
+            return;
         }
 
-        paused = !paused;
-        return
+        // Enter key (13)
+        if (chunk[0] === 13) {
+            this.audioEngine.playSong(this.currentSongIndex);
+            return;
+        }
+
+        // Pause / Resume on 'P' (80) or 'p' (112)
+        if (chunk[0] === 80 || chunk[0] === 112) {
+            this.audioEngine.pauseResume();
+            return;
+        }
+
+        // Next song on 'N' (78) or 'n' (110)
+        if (chunk[0] === 78 || chunk[0] === 110) {
+            this.audioEngine.nextSong();
+            return;
+        }
+
+        // Previous song on 'B' (66) or 'b' (98)
+        if (chunk[0] === 66 || chunk[0] === 98) {
+            this.audioEngine.previousSong();
+            return;
+        }
     }
+}
 
-    /**
-        next (n), previous (b)
-     */
-
-    if(chunk[0] === 78 || chunk[0] === 110) {
-        // next
-        currentSongIndex = (currentSongIndex + 1) % allSongs.length;
-        buildMenu();
-        playSong();
-        return
-    }
-
-    if(chunk[0] === 66 || chunk[0] === 98) {
-        // b previous
-        currentSongIndex = (currentSongIndex === 0 ? allSongs.length - 1 : currentSongIndex - 1) % allSongs.length;
-        buildMenu();
-        playSong();
-        return
-    }
-    
-})
-
-process.on('SIGINT', signal => {
-    console.log(`\nClosing player with recieved signal as: ${signal}`);
-    console.log('Bye Bye');
-    process.exit();
-})
-
-buildMenu();
+// Instantiate and start application
+const songManager = new SongManager();
+const audioEngine = new AudioEngine(songManager);
+const terminalUI = new TerminalInterface(songManager, audioEngine);
