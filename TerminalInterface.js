@@ -14,6 +14,10 @@ export class TerminalInterface {
             this.drawSeekBar(timeElapsed, duration);
         };
 
+        this.audioEngine.onVisualizerTick = (timeElapsed, duration) => {
+            this.drawSeekBar(timeElapsed, duration);
+        };
+
         this.init();
     }
 
@@ -56,7 +60,7 @@ export class TerminalInterface {
     }
 
     drawSeekBar(timeElapsed, duration) {
-        const width = 30;
+        const width = 24;
         const fraction = Math.min(1, Math.max(0, timeElapsed / duration));
         const fill = Math.floor(fraction * width);
         const empty = width - fill;
@@ -65,8 +69,11 @@ export class TerminalInterface {
             ? `🔇 MUTED`
             : `🔊 ${this.audioEngine.getVolumePercent()}%`;
 
-        const bar = `${'█'.repeat(fill)}${'░'.repeat(empty)}`;
-        process.stdout.write(`\r[${bar}] ${timeElapsed}/${duration}s | ${volStatus} | (Seek: [←/→] ±10s | Vol: [+/-/M])`);
+        const visualizer = this.audioEngine.getVisualizerWave(16);
+        const progressBar = `${'█'.repeat(fill)}${'░'.repeat(empty)}`;
+
+        // Single in-place line with Seekbar, Animated EQ, and Volume HUD
+        process.stdout.write(`\r[${progressBar}] ${timeElapsed}/${duration}s | ♫ [${visualizer}] | ${volStatus} `);
     }
 
     handleInput(chunk) {
@@ -147,5 +154,6 @@ export class TerminalInterface {
         }
     }
 }
+
 
 

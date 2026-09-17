@@ -3,10 +3,11 @@ import path from "path";
 import { SongMetadata } from "./SongManager.js";
 
 export class AudioEngine {
-    constructor(songManager, onTrackChange = null, onSeekBar = null) {
+    constructor(songManager, onTrackChange = null, onSeekBar = null, onVisualizerTick = null) {
         this.songManager = songManager;
         this.onTrackChange = onTrackChange;
         this.onSeekBar = onSeekBar; // callback to draw seekbar from UI
+        this.onVisualizerTick = onVisualizerTick; // callback to redraw visualizer bars
 
         this.player = null;
         this.paused = false;
@@ -19,6 +20,9 @@ export class AudioEngine {
         this.volume = 256;
         this.isMuted = false;
         this.previousVolume = 256;
+
+        // Dynamic visualizer wave phase
+        this.visPhase = 0;
     }
 
     getSongInfo(songPath) {
@@ -110,6 +114,10 @@ export class AudioEngine {
 
         this.paused = !this.paused;
         this.sendVlcCommand('pause');
+
+        if (this.onVisualizerTick) {
+            this.onVisualizerTick(this.currentTime, this.currentDuration);
+        }
     }
 
     seekRelative(seconds) {
@@ -162,6 +170,23 @@ export class AudioEngine {
         return Math.round((this.volume / 256) * 100);
     }
 
+    getVisualizerWave(columns = 28) {
+        const blocks = [' ', ' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        let wave = '';
+
+        for (let i = 0; i < columns; i++) {
+            if (this.paused || !this.player) {
+                wave += ' ';
+            } else {
+                const wave1 = Math.sin(this.visPhase + i * 0.4);
+                const wave2 = Math.cos(this.visPhase * 1.6 + i * 0.25);
+                const amp = Math.floor(((wave1 + wave2 + 2) / 4) * (blocks.length - 1));
+                wave += blocks[Math.min(blocks.length - 1, Math.max(0, amp))];
+            }
+        }
+        return wave;
+    }
+
     nextSong() {
         const total = this.songManager.getSongCount();
         if (total === 0) return;
@@ -195,19 +220,26 @@ export class AudioEngine {
     }
 
     startSeekBar(duration) {
+        // Runs at 250ms for smooth animated equalizer response
         this.seekBarInterval = setInterval(() => {
             if (this.paused || !this.player) return;
 
-            this.currentTime += 1;
+            this.currentTime += 0.25;
+            this.visPhase = (this.visPhase + 0.35) % (Math.PI * 2);
 
             if (this.currentTime >= duration) {
                 if (this.onSeekBar) this.onSeekBar(duration, duration);
                 clearInterval(this.seekBarInterval);
             } else {
-                if (this.onSeekBar) this.onSeekBar(Number(this.currentTime.toFixed(0)), duration);
+                if (this.onVisualizerTick) {
+                    this.onVisualizerTick(Number(this.currentTime.toFixed(0)), duration);
+                } else if (this.onSeekBar) {
+                    this.onSeekBar(Number(this.currentTime.toFixed(0)), duration);
+                }
             }
-        }, 1000);
+        }, 250);
     }
 }
+
 
 
