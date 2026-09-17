@@ -14,6 +14,11 @@ export class AudioEngine {
         this.currentTime = 0;
         this.seekBarInterval = null;
         this.currentSongIndex = 0;
+
+        // Volume: VLC scale 0-512 (256 is 100%)
+        this.volume = 256;
+        this.isMuted = false;
+        this.previousVolume = 256;
     }
 
     getSongInfo(songPath) {
@@ -82,6 +87,9 @@ export class AudioEngine {
             });
 
             childProcess.on('spawn', () => {
+                // Apply active volume to VLC process
+                const activeVol = this.isMuted ? 0 : this.volume;
+                this.sendVlcCommand(`volume ${activeVol}`);
                 this.startSeekBar(this.currentDuration);
             });
 
@@ -116,6 +124,42 @@ export class AudioEngine {
         if (this.onSeekBar) {
             this.onSeekBar(Number(this.currentTime.toFixed(0)), this.currentDuration);
         }
+    }
+
+    setVolumeRelative(delta) {
+        // Unmute if muted when adjusting volume
+        if (this.isMuted) {
+            this.isMuted = false;
+        }
+
+        // VLC range: 0 - 512 (256 = 100%)
+        this.volume = Math.max(0, Math.min(512, this.volume + delta));
+        this.sendVlcCommand(`volume ${this.volume}`);
+
+        if (this.onSeekBar) {
+            this.onSeekBar(Number(this.currentTime.toFixed(0)), this.currentDuration);
+        }
+    }
+
+    toggleMute() {
+        if (this.isMuted) {
+            this.isMuted = false;
+            this.volume = this.previousVolume > 0 ? this.previousVolume : 256;
+            this.sendVlcCommand(`volume ${this.volume}`);
+        } else {
+            this.isMuted = true;
+            this.previousVolume = this.volume;
+            this.sendVlcCommand('volume 0');
+        }
+
+        if (this.onSeekBar) {
+            this.onSeekBar(Number(this.currentTime.toFixed(0)), this.currentDuration);
+        }
+    }
+
+    getVolumePercent() {
+        if (this.isMuted) return 0;
+        return Math.round((this.volume / 256) * 100);
     }
 
     nextSong() {
@@ -165,4 +209,5 @@ export class AudioEngine {
         }, 1000);
     }
 }
+
 

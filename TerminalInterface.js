@@ -47,7 +47,12 @@ export class TerminalInterface {
             }
         });
 
-        console.log('\n[↑/↓] Select | [Enter] Play | [P] Pause | [←/→] ±10s Seek | [N/B] Next/Prev | [Q] Quit');
+        const volText = this.audioEngine.isMuted
+            ? `[MUTED]`
+            : `Vol: ${this.audioEngine.getVolumePercent()}%`;
+
+        console.log(`\n[↑/↓] Select | [Enter] Play | [P] Pause | [←/→] ±10s Seek`);
+        console.log(`[+/-] Volume | [M] Mute (${volText}) | [N/B] Next/Prev | [Q] Quit`);
     }
 
     drawSeekBar(timeElapsed, duration) {
@@ -56,8 +61,12 @@ export class TerminalInterface {
         const fill = Math.floor(fraction * width);
         const empty = width - fill;
 
+        const volStatus = this.audioEngine.isMuted
+            ? `🔇 MUTED`
+            : `🔊 ${this.audioEngine.getVolumePercent()}%`;
+
         const bar = `${'█'.repeat(fill)}${'░'.repeat(empty)}`;
-        process.stdout.write(`\r[${bar}] ${timeElapsed}/${duration}s (Seek: [←] -10s | [→] +10s)`);
+        process.stdout.write(`\r[${bar}] ${timeElapsed}/${duration}s | ${volStatus} | (Seek: [←/→] ±10s | Vol: [+/-/M])`);
     }
 
     handleInput(chunk) {
@@ -104,6 +113,27 @@ export class TerminalInterface {
             return;
         }
 
+        // Volume Up on '+' or '='
+        if (chunk[0] === 43 || chunk[0] === 61) {
+            this.audioEngine.setVolumeRelative(16); // +~6%
+            this.buildMenu();
+            return;
+        }
+
+        // Volume Down on '-' or '_'
+        if (chunk[0] === 45 || chunk[0] === 95) {
+            this.audioEngine.setVolumeRelative(-16); // -~6%
+            this.buildMenu();
+            return;
+        }
+
+        // Mute toggle on 'M' (77) or 'm' (109)
+        if (chunk[0] === 77 || chunk[0] === 109) {
+            this.audioEngine.toggleMute();
+            this.buildMenu();
+            return;
+        }
+
         // Next song on 'N' (78) or 'n' (110)
         if (chunk[0] === 78 || chunk[0] === 110) {
             this.audioEngine.nextSong();
@@ -117,4 +147,5 @@ export class TerminalInterface {
         }
     }
 }
+
 
