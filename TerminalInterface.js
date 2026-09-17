@@ -1,9 +1,58 @@
+// Color Palettes
+const THEMES = {
+    cyberpunk: {
+        name: "Cyberpunk 2077",
+        bannerBg: "\x1b[45m",
+        bannerFg: "\x1b[97m\x1b[1m",
+        primary: "\x1b[96m",       // Neon Cyan
+        secondary: "\x1b[95m",     // Neon Magenta
+        accent: "\x1b[93m",        // Neon Yellow
+        highlightBg: "\x1b[44m",
+        text: "\x1b[97m",
+        dim: "\x1b[90m",
+        bar: "\x1b[92m",
+        border: "\x1b[35m"
+    },
+    dark: {
+        name: "Dark Modern",
+        bannerBg: "\x1b[40m",
+        bannerFg: "\x1b[97m\x1b[1m",
+        primary: "\x1b[36m",       // Soft Cyan
+        secondary: "\x1b[34m",     // Blue
+        accent: "\x1b[33m",        // Amber
+        highlightBg: "\x1b[100m",
+        text: "\x1b[37m",
+        dim: "\x1b[90m",
+        bar: "\x1b[32m",
+        border: "\x1b[90m"
+    },
+    matrix: {
+        name: "The Matrix",
+        bannerBg: "\x1b[42m",
+        bannerFg: "\x1b[30m\x1b[1m",
+        primary: "\x1b[92m",       // Bright Green
+        secondary: "\x1b[32m",     // Forest Green
+        accent: "\x1b[97m",        // White
+        highlightBg: "\x1b[42m\x1b[30m",
+        text: "\x1b[32m",
+        dim: "\x1b[90m",
+        bar: "\x1b[92m",
+        border: "\x1b[32m"
+    }
+};
+
+const RESET = "\x1b[0m";
+
 export class TerminalInterface {
     constructor(songManager, audioEngine) {
         this.songManager = songManager;
         this.audioEngine = audioEngine;
         this.currentSongIndex = 0;
         this.isRawMode = true;
+
+        // Theme management
+        this.themeKeys = ["cyberpunk", "dark", "matrix"];
+        this.currentThemeIndex = 0;
 
         this.audioEngine.onTrackChange = (newIndex) => {
             this.currentSongIndex = newIndex;
@@ -19,6 +68,15 @@ export class TerminalInterface {
         };
 
         this.init();
+    }
+
+    get theme() {
+        return THEMES[this.themeKeys[this.currentThemeIndex]];
+    }
+
+    cycleTheme() {
+        this.currentThemeIndex = (this.currentThemeIndex + 1) % this.themeKeys.length;
+        this.buildMenu();
     }
 
     init() {
@@ -39,41 +97,51 @@ export class TerminalInterface {
     }
 
     buildMenu() {
+        const t = this.theme;
         process.stdout.write('\x1B[2J');   // clear screen
         process.stdout.write('\x1B[0;0H'); // move cursor to row 0, col 0
+
+        // Banner Header
+        console.log(`${t.bannerBg}${t.bannerFg} 🎧 CLI MUSIC PLAYER 🎵 [Theme: ${t.name}] ${RESET}`);
+        console.log(`${t.border}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}`);
 
         const songs = this.songManager.allSongs;
         songs.forEach((song, index) => {
             if (this.currentSongIndex === index) {
-                console.log(` > ${song}`);
+                console.log(` ${t.accent}➔${RESET} ${t.highlightBg}${t.text} [${index + 1}] ${song} ${RESET}`);
             } else {
-                console.log(`   ${song}`);
+                console.log(`   ${t.dim} [${index + 1}] ${song}${RESET}`);
             }
         });
 
         const volText = this.audioEngine.isMuted
-            ? `[MUTED]`
-            : `Vol: ${this.audioEngine.getVolumePercent()}%`;
+            ? `${t.accent}[MUTED]${RESET}`
+            : `${t.secondary}Vol: ${this.audioEngine.getVolumePercent()}%${RESET}`;
 
-        console.log(`\n[↑/↓] Select | [Enter] Play | [P] Pause | [←/→] ±10s Seek`);
-        console.log(`[+/-] Volume | [M] Mute (${volText}) | [N/B] Next/Prev | [Q] Quit`);
+        console.log(`${t.border}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}`);
+        console.log(`${t.primary}[↑/↓]${RESET} Select | ${t.primary}[Enter]${RESET} Play | ${t.primary}[P]${RESET} Pause | ${t.primary}[←/→]${RESET} ±10s Seek`);
+        console.log(`${t.primary}[+/-]${RESET} Volume | ${t.primary}[M]${RESET} Mute (${volText}) | ${t.primary}[T]${RESET} Cycle Theme`);
+        console.log(`${t.primary}[N/B]${RESET} Next/Prev | ${t.accent}[Q]${RESET} Quit`);
+        console.log(`${t.border}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}`);
     }
 
     drawSeekBar(timeElapsed, duration) {
-        const width = 24;
+        const t = this.theme;
+        const width = 20;
         const fraction = Math.min(1, Math.max(0, timeElapsed / duration));
         const fill = Math.floor(fraction * width);
         const empty = width - fill;
 
         const volStatus = this.audioEngine.isMuted
-            ? `🔇 MUTED`
-            : `🔊 ${this.audioEngine.getVolumePercent()}%`;
+            ? `${t.accent}🔇 MUTED${RESET}`
+            : `${t.secondary}🔊 ${this.audioEngine.getVolumePercent()}%${RESET}`;
 
-        const visualizer = this.audioEngine.getVisualizerWave(16);
-        const progressBar = `${'█'.repeat(fill)}${'░'.repeat(empty)}`;
+        const rawVis = this.audioEngine.getVisualizerWave(16);
+        const coloredVis = `${t.accent}${rawVis}${RESET}`;
+        const progressBar = `${t.bar}${'█'.repeat(fill)}${RESET}${t.dim}${'░'.repeat(empty)}${RESET}`;
 
         // Single in-place line with Seekbar, Animated EQ, and Volume HUD
-        process.stdout.write(`\r[${progressBar}] ${timeElapsed}/${duration}s | ♫ [${visualizer}] | ${volStatus} `);
+        process.stdout.write(`\r[${progressBar}] ${t.primary}${timeElapsed}/${duration}s${RESET} | ♫ [${coloredVis}] | ${volStatus} `);
     }
 
     handleInput(chunk) {
@@ -120,6 +188,12 @@ export class TerminalInterface {
             return;
         }
 
+        // Cycle Theme on 'T' (84) or 't' (116)
+        if (chunk[0] === 84 || chunk[0] === 116) {
+            this.cycleTheme();
+            return;
+        }
+
         // Volume Up on '+' or '='
         if (chunk[0] === 43 || chunk[0] === 61) {
             this.audioEngine.setVolumeRelative(16); // +~6%
@@ -154,6 +228,7 @@ export class TerminalInterface {
         }
     }
 }
+
 
 
 
