@@ -46,16 +46,18 @@ export class TerminalInterface {
                 console.log(`   ${song}`);
             }
         });
+
+        console.log('\n[↑/↓] Select | [Enter] Play | [P] Pause | [←/→] ±10s Seek | [N/B] Next/Prev | [Q] Quit');
     }
 
     drawSeekBar(timeElapsed, duration) {
         const width = 30;
-        const fraction = Math.min(1, timeElapsed / duration);
+        const fraction = Math.min(1, Math.max(0, timeElapsed / duration));
         const fill = Math.floor(fraction * width);
         const empty = width - fill;
 
         const bar = `${'█'.repeat(fill)}${'░'.repeat(empty)}`;
-        process.stdout.write(`\r[${bar}] ${timeElapsed}/${duration}s`);
+        process.stdout.write(`\r[${bar}] ${timeElapsed}/${duration}s (Seek: [←] -10s | [→] +10s)`);
     }
 
     handleInput(chunk) {
@@ -67,20 +69,27 @@ export class TerminalInterface {
             return;
         }
 
-        // Arrow keys
+        // Arrow keys (3 bytes: [27, 91, 65/66/67/68])
         if (chunk[0] === 27 && chunk[1] === 91) {
             if (chunk[2] === 65) { // Up Arrow
                 if (!this.audioEngine.paused) {
                     this.currentSongIndex = (this.currentSongIndex === 0 ? total - 1 : this.currentSongIndex - 1) % total;
                     this.buildMenu();
                 }
+                return;
             } else if (chunk[2] === 66) { // Down Arrow
                 if (!this.audioEngine.paused) {
                     this.currentSongIndex = (this.currentSongIndex + 1) % total;
                     this.buildMenu();
                 }
+                return;
+            } else if (chunk[2] === 67) { // Right Arrow -> Fast-forward 10s
+                this.audioEngine.seekRelative(10);
+                return;
+            } else if (chunk[2] === 68) { // Left Arrow -> Rewind 10s
+                this.audioEngine.seekRelative(-10);
+                return;
             }
-            return;
         }
 
         // Enter key (13)
@@ -108,3 +117,4 @@ export class TerminalInterface {
         }
     }
 }
+

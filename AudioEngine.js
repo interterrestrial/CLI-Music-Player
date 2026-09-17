@@ -10,15 +10,14 @@ export class AudioEngine {
 
         this.player = null;
         this.paused = false;
-        this.startTime = 0;
-        this.pausedAt = 0;
-        this.totalPausedTime = 0;
+        this.currentDuration = 0;
+        this.currentTime = 0;
         this.seekBarInterval = null;
         this.currentSongIndex = 0;
     }
 
     getSongInfo(songPath) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             const childProcess = spawn('afinfo', [songPath], {
                 stdio: 'pipe'
             });
@@ -29,24 +28,30 @@ export class AudioEngine {
                 output += chunk.toString();
             });
 
+            childProcess.on('error', () => {
+                resolve(new SongMetadata(120, path.basename(songPath), songPath));
+            });
+
             childProcess.stdout.on('end', () => {
                 const match = output.match(/estimated duration:\s+([\d.]+)\s+sec/);
-                if (!match) {
-                    reject({ duration: null });
-                    return;
-                }
-
+                const duration = match ? Number(match[1]) : 120;
                 resolve(new SongMetadata(
-                    Number(match[1]).toFixed(2),
+                    duration.toFixed(2),
                     path.basename(songPath),
                     songPath
                 ));
             });
-
-            childProcess.stdout.on('error', (err) => {
-                reject(err);
-            });
         });
+    }
+
+    sendVlcCommand(command) {
+        if (this.player && this.player.stdin && !this.player.stdin.destroyed) {
+            try {
+                this.player.stdin.write(`${command}\n`);
+            } catch (e) {
+                // Ignore pipe errors
+            }
+        }
     }
 
     async playSong(index = this.currentSongIndex) {
@@ -58,21 +63,29 @@ export class AudioEngine {
 
         try {
             const metadata = await this.getSongInfo(songPath);
+            this.currentDuration = Number(metadata.duration) || 0;
+            this.currentTime = 0;
+            this.paused = false;
 
-            const childProcess = spawn('afplay', [songPath], {
-                stdio: 'pipe',
+            // Spawn VLC in remote control (rc) interface mode without video
+            const childProcess = spawn('vlc', [
+                '-I', 'rc',
+                '--no-video',
+                '--play-and-exit',
+                songPath
+            ], {
+                stdio: ['pipe', 'pipe', 'pipe']
             });
 
             childProcess.on('error', (err) => {
-                console.log(`\nPlayback error: ${err.message}`);
+                console.log(`\nVLC Playback error: ${err.message}`);
             });
 
             childProcess.on('spawn', () => {
-                this.startTime = Date.now();
-                this.startSeekBar(metadata.duration);
+                this.startSeekBar(this.currentDuration);
             });
 
-            childProcess.on('close', (code, signal) => {
+            childProcess.on('close', () => {
                 if (this.player === childProcess) {
                     this.nextSong();
                 }
@@ -87,15 +100,22 @@ export class AudioEngine {
     pauseResume() {
         if (!this.player) return;
 
-        if (this.paused) {
-            this.player.kill('SIGCONT');
-            this.totalPausedTime += Date.now() - this.pausedAt;
-        } else {
-            this.player.kill('SIGSTOP');
-            this.pausedAt = Date.now();
-        }
-
         this.paused = !this.paused;
+        this.sendVlcCommand('pause');
+    }
+
+    seekRelative(seconds) {
+        if (!this.player || this.currentDuration <= 0) return;
+
+        const newTime = Math.max(0, Math.min(this.currentDuration, this.currentTime + seconds));
+        this.currentTime = newTime;
+
+        // VLC rc interface: 'seek <seconds>' jumps to the specified timestamp
+        this.sendVlcCommand(`seek ${Math.floor(newTime)}`);
+
+        if (this.onSeekBar) {
+            this.onSeekBar(Number(this.currentTime.toFixed(0)), this.currentDuration);
+        }
     }
 
     nextSong() {
@@ -120,31 +140,29 @@ export class AudioEngine {
             this.seekBarInterval = null;
         }
         this.paused = false;
-        this.startTime = 0;
-        this.pausedAt = 0;
-        this.totalPausedTime = 0;
+        this.currentTime = 0;
 
         if (this.player) {
             this.player.removeAllListeners('close');
-            this.player.kill();
+            this.sendVlcCommand('quit');
+            this.player.kill('SIGKILL');
             this.player = null;
         }
     }
 
     startSeekBar(duration) {
         this.seekBarInterval = setInterval(() => {
-            if (this.paused) return;
+            if (this.paused || !this.player) return;
 
-            const timeElapsed = Number(((Date.now() - this.startTime - this.totalPausedTime) / 1000).toFixed(0));
+            this.currentTime += 1;
 
-            if (this.onSeekBar) {
-                if (timeElapsed >= duration) {
-                    this.onSeekBar(duration, duration);
-                    clearInterval(this.seekBarInterval);
-                } else {
-                    this.onSeekBar(timeElapsed, duration);
-                }
+            if (this.currentTime >= duration) {
+                if (this.onSeekBar) this.onSeekBar(duration, duration);
+                clearInterval(this.seekBarInterval);
+            } else {
+                if (this.onSeekBar) this.onSeekBar(Number(this.currentTime.toFixed(0)), duration);
             }
         }, 1000);
     }
 }
+
