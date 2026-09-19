@@ -2,12 +2,19 @@ import path, { join } from "path";
 import { readdirSync } from "fs";
 
 export class SongMetadata {
-    constructor(duration, fileName, filePath) {
+    constructor(duration, fileName, filePath, tags = {}) {
         this.duration = duration;
         this.fileName = fileName;
         this.filePath = filePath;
+        this.title = tags.title || fileName.replace(/\.[^/.]+$/, "");
+        this.artist = tags.artist || "Unknown Artist";
+        this.album = tags.album || "Unknown Album";
+        this.year = tags.year || "Unknown Year";
+        this.genre = tags.genre || "Unknown Genre";
+        this.lyrics = tags.lyrics || null;
     }
 }
+
 
 export class SongManager {
     constructor(directory = join(process.cwd(), 'songs')) {

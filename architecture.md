@@ -1,7 +1,7 @@
 # CLI Music Player - System Architecture & Specification
 
 ## 1. System Overview
-The **CLI Music Player** is a terminal-based interactive audio player developed in Node.js. It features raw-mode terminal event handling, in-place ANSI rendering, audio metadata extraction, background process spawning for playback, time-accurate playback tracking with pausing capabilities, and a dynamic progress seek bar.
+The **CLI Music Player** is a terminal-based interactive audio player developed in Node.js. It features raw-mode terminal event handling, in-place ANSI rendering, ID3 tag metadata extraction (artist, album, year, genre, lyrics via `music-metadata`), background process spawning for playback via VLC, time-accurate playback tracking with pausing capabilities, a dynamic progress seek bar, animated audio visualizer, volume control, multiple color themes, and embedded lyrics display.
 
 ---
 
@@ -19,12 +19,14 @@ graph LR
         UC5[Skip Track Next / Previous]
         UC6[Auto-Advance Next Track]
         UC7[Exit Application Safely]
+        UC8[View ID3 Tags - Artist, Album, Year, Genre]
+        UC9[Toggle Lyrics Display]
     end
 
     subgraph "OS & Subsystems"
         OS_FS[(File System / Directory)]
-        OS_Meta[Metadata Extractor afinfo]
-        OS_Audio[Audio Player Process vlc / afplay]
+        OS_Meta["Metadata Extractor (music-metadata npm)"]
+        OS_Audio[Audio Player Process vlc]
     end
 
     User --> UC1
@@ -33,14 +35,18 @@ graph LR
     User --> UC4
     User --> UC5
     User --> UC7
+    User --> UC8
+    User --> UC9
 
     UC1 -.->|Scan Directory| OS_FS
-    UC2 -.->|Extract Duration| OS_Meta
+    UC2 -.->|Extract Duration & ID3 Tags| OS_Meta
     UC2 -.->|Spawn Playback| OS_Audio
     UC3 -.->|IPC Command / Signals| OS_Audio
     UC4 -.->|Timer Tick Calculation| UC2
     UC6 -.->|Process Exit Trigger| UC2
     UC7 -.->|Kill Processes / Clear Timers| OS_Audio
+    UC8 -.->|Read Tag Fields| OS_Meta
+    UC9 -.->|Display Lyrics| UC8
 ```
 
 ---
@@ -84,6 +90,12 @@ classDiagram
         +duration: Number
         +fileName: String
         +filePath: String
+        +title: String
+        +artist: String
+        +album: String
+        +year: String
+        +genre: String
+        +lyrics: String
     }
 
     TerminalInterface --> SongManager : Queries playlist
@@ -119,6 +131,12 @@ erDiagram
         string absolutePath FK
         float durationSeconds
         string format
+        string title
+        string artist
+        string album
+        string year
+        string genre
+        string lyrics
     }
 
     PLAYER_SESSION {

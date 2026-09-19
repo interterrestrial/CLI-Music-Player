@@ -49,6 +49,7 @@ export class TerminalInterface {
         this.audioEngine = audioEngine;
         this.currentSongIndex = 0;
         this.isRawMode = true;
+        this.showLyrics = false;
 
         // Theme management
         this.themeKeys = ["cyberpunk", "dark", "matrix"];
@@ -114,6 +115,29 @@ export class TerminalInterface {
             }
         });
 
+        // Now Playing section with ID3 tag info
+        const meta = this.audioEngine.currentMetadata;
+        if (meta && this.audioEngine.player) {
+            console.log(`${t.border}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}`);
+            console.log(`${t.accent} ♪ Now Playing ${RESET}`);
+            console.log(`   ${t.primary}Title:${RESET}  ${t.text}${meta.title}${RESET}`);
+            console.log(`   ${t.primary}Artist:${RESET} ${t.text}${meta.artist}${RESET}`);
+            console.log(`   ${t.primary}Album:${RESET}  ${t.text}${meta.album}${RESET}`);
+            console.log(`   ${t.primary}Year:${RESET}   ${t.text}${meta.year}${RESET}`);
+            console.log(`   ${t.primary}Genre:${RESET}  ${t.text}${meta.genre}${RESET}`);
+
+            // Show lyrics if toggled on
+            if (this.showLyrics && meta.lyrics) {
+                console.log(`${t.border}── Lyrics ──────────────────────────────────────────────────${RESET}`);
+                const lines = meta.lyrics.split('\n');
+                lines.forEach(line => {
+                    console.log(`   ${t.dim}${line}${RESET}`);
+                });
+            } else if (this.showLyrics && !meta.lyrics) {
+                console.log(`   ${t.dim}(No lyrics embedded in this file)${RESET}`);
+            }
+        }
+
         const volText = this.audioEngine.isMuted
             ? `${t.accent}[MUTED]${RESET}`
             : `${t.secondary}Vol: ${this.audioEngine.getVolumePercent()}%${RESET}`;
@@ -121,7 +145,7 @@ export class TerminalInterface {
         console.log(`${t.border}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}`);
         console.log(`${t.primary}[↑/↓]${RESET} Select | ${t.primary}[Enter]${RESET} Play | ${t.primary}[P]${RESET} Pause | ${t.primary}[←/→]${RESET} ±10s Seek`);
         console.log(`${t.primary}[+/-]${RESET} Volume | ${t.primary}[M]${RESET} Mute (${volText}) | ${t.primary}[T]${RESET} Cycle Theme`);
-        console.log(`${t.primary}[N/B]${RESET} Next/Prev | ${t.accent}[Q]${RESET} Quit`);
+        console.log(`${t.primary}[N/B]${RESET} Next/Prev | ${t.primary}[L]${RESET} Lyrics | ${t.accent}[Q]${RESET} Quit`);
         console.log(`${t.border}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}`);
     }
 
@@ -224,6 +248,13 @@ export class TerminalInterface {
         // Previous song on 'B' (66) or 'b' (98)
         if (chunk[0] === 66 || chunk[0] === 98) {
             this.audioEngine.previousSong();
+            return;
+        }
+
+        // Toggle Lyrics on 'L' (76) or 'l' (108)
+        if (chunk[0] === 76 || chunk[0] === 108) {
+            this.showLyrics = !this.showLyrics;
+            this.buildMenu();
             return;
         }
     }

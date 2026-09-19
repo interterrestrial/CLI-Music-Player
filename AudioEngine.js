@@ -1,5 +1,6 @@
 import { spawn } from "child_process";
 import path from "path";
+import { parseFile } from "music-metadata";
 import { SongMetadata } from "./SongManager.js";
 
 export class AudioEngine {
@@ -15,6 +16,7 @@ export class AudioEngine {
         this.currentTime = 0;
         this.seekBarInterval = null;
         this.currentSongIndex = 0;
+        this.currentMetadata = null; // Stores full ID3 tag metadata for the current track
 
         // Volume: VLC scale 0-512 (256 is 100%)
         this.volume = 256;
@@ -25,32 +27,31 @@ export class AudioEngine {
         this.visPhase = 0;
     }
 
-    getSongInfo(songPath) {
-        return new Promise((resolve) => {
-            const childProcess = spawn('afinfo', [songPath], {
-                stdio: 'pipe'
-            });
+    async getSongInfo(songPath) {
+        try {
+            const metadata = await parseFile(songPath);
+            const duration = metadata.format.duration || 120;
+            const common = metadata.common || {};
 
-            let output = '';
+            const tags = {
+                title: common.title || null,
+                artist: common.artist || null,
+                album: common.album || null,
+                year: common.year ? String(common.year) : null,
+                genre: (common.genre && common.genre.length > 0) ? common.genre.join(', ') : null,
+                lyrics: (common.lyrics && common.lyrics.length > 0) ? common.lyrics[0].text : null
+            };
 
-            childProcess.stdout.on('data', chunk => {
-                output += chunk.toString();
-            });
-
-            childProcess.on('error', () => {
-                resolve(new SongMetadata(120, path.basename(songPath), songPath));
-            });
-
-            childProcess.stdout.on('end', () => {
-                const match = output.match(/estimated duration:\s+([\d.]+)\s+sec/);
-                const duration = match ? Number(match[1]) : 120;
-                resolve(new SongMetadata(
-                    duration.toFixed(2),
-                    path.basename(songPath),
-                    songPath
-                ));
-            });
-        });
+            return new SongMetadata(
+                duration.toFixed(2),
+                path.basename(songPath),
+                songPath,
+                tags
+            );
+        } catch (e) {
+            // Fallback if metadata parsing fails
+            return new SongMetadata(120, path.basename(songPath), songPath);
+        }
     }
 
     sendVlcCommand(command) {
@@ -72,6 +73,7 @@ export class AudioEngine {
 
         try {
             const metadata = await this.getSongInfo(songPath);
+            this.currentMetadata = metadata;
             this.currentDuration = Number(metadata.duration) || 0;
             this.currentTime = 0;
             this.paused = false;

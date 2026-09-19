@@ -1,0 +1,25 @@
+{
+  "name": "cli-music-player",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "A sleek, interactive, and lightweight Terminal Music Player built with **Node.js** featuring in-place ANSI rendering, real-time keyboard navigation, live progress seekbar, and seamless audio controls.",
+  "main": "musicplayer.js",
+  "scripts": {
+    "start": "node musicplayer.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/interterrestrial/CLI-Music-Player.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/interterrestrial/CLI-Music-Player/issues"
+  },
+  "homepage": "https://github.com/interterrestrial/CLI-Music-Player#readme",
+  "dependencies": {
+    "music-metadata": "^11.15.0"
+  }
+}
